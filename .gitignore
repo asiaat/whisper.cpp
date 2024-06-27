@@ -68,3 +68,6 @@ local.properties
 *.txt
 *.log 
 
+kommand
+./kommand 
+

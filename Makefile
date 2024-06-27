@@ -496,6 +496,20 @@ stream: examples/stream/stream.cpp $(SRC_COMMON) $(SRC_COMMON_SDL) $(WHISPER_OBJ
 command: examples/command/command.cpp $(SRC_COMMON) $(SRC_COMMON_SDL) $(WHISPER_OBJ)
 	$(CXX) $(CXXFLAGS) examples/command/command.cpp $(SRC_COMMON) $(SRC_COMMON_SDL) $(WHISPER_OBJ) -o command $(CC_SDL) $(LDFLAGS)
 
+#kommand: examples/kommand/kommand.cpp $(SRC_COMMON) $(SRC_COMMON_SDL) $(WHISPER_OBJ)
+#	$(CXX) $(CXXFLAGS) examples/kommand/kommand.cpp $(SRC_COMMON) $(SRC_COMMON_SDL) $(WHISPER_OBJ) -o kommand $(CC_SDL) $(LDFLAGS)
+
+SRC_SQLITE_LOGGER = examples/kommand/SqliteLogger.cpp
+
+# Loome objektfaili reegli SqliteLogger.cpp jaoks
+SqliteLogger.o: examples/kommand/SqliteLogger.cpp examples/kommand/SqliteLogger.h
+	$(CXX) $(CXXFLAGS) -c examples/kommand/SqliteLogger.cpp -o SqliteLogger.o
+
+# Uuendame kommand sihtmärki
+kommand: examples/kommand/kommand.cpp $(SRC_COMMON) $(SRC_COMMON_SDL) $(WHISPER_OBJ) $(if $(SRC_SQLITE_LOGGER),SqliteLogger.o)
+	$(CXX) $(CXXFLAGS) examples/kommand/kommand.cpp $(SRC_COMMON) $(SRC_COMMON_SDL) $(if $(SRC_SQLITE_LOGGER),SqliteLogger.o) $(WHISPER_OBJ) -o kommand $(CC_SDL) $(LDFLAGS) $(if $(SRC_SQLITE_LOGGER),-lsqlite3)
+
+
 lsp: examples/lsp/lsp.cpp $(SRC_COMMON) $(SRC_COMMON_SDL) $(WHISPER_OBJ)
 	$(CXX) $(CXXFLAGS) examples/lsp/lsp.cpp $(SRC_COMMON) $(SRC_COMMON_SDL) $(WHISPER_OBJ) -o lsp $(CC_SDL) $(LDFLAGS)
 
