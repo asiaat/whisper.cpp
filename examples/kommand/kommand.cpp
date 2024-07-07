@@ -42,6 +42,8 @@ void logger_function() {
 }
 */
 
+int TOKEN_SIZE = 2048;
+
 // command-line parameters
 struct whisper_params {
     int32_t n_threads  = std::min(4, (int32_t) std::thread::hardware_concurrency());
@@ -288,7 +290,7 @@ int process_command_list(struct whisper_context * ctx, audio_async &audio, const
     std::vector<std::vector<whisper_token>> allowed_tokens;
 
     for (const auto & cmd : allowed_commands) {
-        whisper_token tokens[1024];
+        whisper_token tokens[TOKEN_SIZE];
         allowed_tokens.emplace_back();
 
         for (int l = 0; l < (int) cmd.size(); ++l) {
@@ -296,7 +298,7 @@ int process_command_list(struct whisper_context * ctx, audio_async &audio, const
             //       the reason is that the first decoded token starts with a whitespace too!
             std::string ss = std::string(" ") + cmd.substr(0, l + 1);
 
-            const int n = whisper_tokenize(ctx, ss.c_str(), tokens, 1024);
+            const int n = whisper_tokenize(ctx, ss.c_str(), tokens, TOKEN_SIZE);
             if (n < 0) {
                 fprintf(stderr, "%s: error: failed to tokenize command '%s'\n", __func__, cmd.c_str());
                 return 3;
@@ -332,8 +334,8 @@ int process_command_list(struct whisper_context * ctx, audio_async &audio, const
     // tokenize prompt
     std::vector<whisper_token> k_tokens;
     {
-        k_tokens.resize(1024);
-        const int n = whisper_tokenize(ctx, k_prompt.c_str(), k_tokens.data(), 1024);
+        k_tokens.resize(TOKEN_SIZE);
+        const int n = whisper_tokenize(ctx, k_prompt.c_str(), k_tokens.data(), TOKEN_SIZE);
         if (n < 0) {
             fprintf(stderr, "%s: error: failed to tokenize prompt '%s'\n", __func__, k_prompt.c_str());
             return 4;
@@ -715,7 +717,7 @@ std::string current_timestamp() {
 int process_into_file_transcription(struct whisper_context *ctx, audio_async &audio, const whisper_params &params) {
     bool is_running  = true;
     bool have_prompt = false;
-    bool ask_prompt  = true;
+    bool ask_prompt  = false;
 
     float logprob_min0 = 0.0f;
     float logprob_min  = 0.0f;
@@ -751,7 +753,7 @@ int process_into_file_transcription(struct whisper_context *ctx, audio_async &au
         is_running = sdl_poll_events();
 
         // Delay
-        std::this_thread::sleep_for(std::chrono::milliseconds(100));
+        std::this_thread::sleep_for(std::chrono::milliseconds(200));
 
         if (ask_prompt) {
             ask_prompt = false;
@@ -760,7 +762,7 @@ int process_into_file_transcription(struct whisper_context *ctx, audio_async &au
         {
             audio.get(2000, pcmf32_cur);
 
-            if (vad_simple(pcmf32_cur, WHISPER_SAMPLE_RATE, 1000, params.vad_thold, params.freq_thold, params.print_energy)) {
+            if (vad_simple(pcmf32_cur, WHISPER_SAMPLE_RATE, 1500, params.vad_thold, params.freq_thold, params.print_energy)) { // 1000
                 int64_t t_ms = 0;
 
                 if (!have_prompt) {
@@ -774,76 +776,20 @@ int process_into_file_transcription(struct whisper_context *ctx, audio_async &au
                     fprintf(fp, "%s: Heard '%s%s%s', (t = %d ms, p = %.2f%%)\n", current_timestamp().c_str(), " [ ", txt.c_str(), " ]", (int)t_ms, p);
                     fflush(fp);
 
+                    
                     //logger.log_to_db(ctx, params, txt.c_str());
                     //std::string message = "Tere, see on test sõnum!";
-                    int duration = 100;  // millisekundites
-                    double probability = 0.95;
+                    //int duration = 30;  // millisekundites 100
+                    //double probability = 0.95;
 
-                    logger.log_to_db(txt.c_str(), duration, probability);
+                    //logger.log_to_db(txt.c_str(), duration, probability);
 
-                    const float sim = similarity(txt, k_prompt);
+                    //const float sim = similarity(txt, k_prompt);
 
-                    if (txt.length() < 0.8*k_prompt.length() || txt.length() > 1.2*k_prompt.length() || sim < 0.8f) {
-                        ask_prompt = true;
-                    } else {
-                        fprintf(fp, "\n");
-                        fprintf(fp, "%s: The prompt has been recognized!\n", current_timestamp().c_str());
-                        fprintf(fp, "%s: Waiting for voice commands ...\n", current_timestamp().c_str());
-                        fprintf(fp, "\n");
-                        fflush(fp);
-
-                        // Save the audio for the prompt
-                        pcmf32_prompt = pcmf32_cur;
-                        have_prompt = true;
-                    }
-                } else {
-                    // We have heard the activation phrase, now detect the commands
-                    audio.get(params.command_ms, pcmf32_cur);
-
-                    // Prepend 3 seconds of silence
-                    pcmf32_cur.insert(pcmf32_cur.begin(), 3.0f*WHISPER_SAMPLE_RATE, 0.0f);
-
-                    // Prepend the prompt audio
-                    pcmf32_cur.insert(pcmf32_cur.begin(), pcmf32_prompt.begin(), pcmf32_prompt.end());
-
-                    const auto txt = trim(transcribe(ctx, params, pcmf32_cur, "root", logprob_min, logprob_sum, n_tokens, t_ms));
-
-                    const float p = 100.0f * std::exp(logprob_min);
-
-                    // Find the prompt in the text
-                    float best_sim = 0.0f;
-                    size_t best_len = 0;
-                    for (size_t n = 0.8*k_prompt.size(); n <= 1.2*k_prompt.size(); ++n) {
-                        if (n >= txt.size()) {
-                            break;
-                        }
-
-                        const auto prompt = txt.substr(0, n);
-                        const float sim = similarity(prompt, k_prompt);
-
-                        if (sim > best_sim) {
-                            best_sim = sim;
-                            best_len = n;
-                        }
-                    }
-
-                    fprintf(fp, "%s:   DEBUG: txt = '%s', prob = %.2f%%\n", current_timestamp().c_str(), txt.c_str(), p);
-                    fflush(fp);
-                    if (best_len == 0) {
-                        fprintf(fp, "%s: WARNING: command not recognized, try again\n", current_timestamp().c_str());
-                        fflush(fp);
-                    } else {
-                        // Cut the prompt from the decoded text
-                        const std::string command = trim(txt.substr(best_len));
-
-                        fprintf(fp, "%s: Command '%s%s%s', (t = %d ms)\n", current_timestamp().c_str(), "\033[1m", command.c_str(), "\033[0m", (int)t_ms);
-                        fflush(fp);
-                    }
-
-                    fprintf(fp, "\n");
-                    fflush(fp);
-                }
-
+                    
+                    
+                } 
+               
                 audio.clear();
             }
         }
@@ -912,7 +858,7 @@ int main(int argc, char ** argv) {
     audio.resume();
 
     // wait for 1 second to avoid any buffered noise
-    std::this_thread::sleep_for(std::chrono::milliseconds(1000));
+    std::this_thread::sleep_for(std::chrono::milliseconds(1000)); // orig 1000
     audio.clear();
 
     int  ret_val = 0;
